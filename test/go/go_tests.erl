@@ -98,7 +98,8 @@ length_test_() ->
 
 recursion_test_() ->
     ?SETUP(
-        ?_assertEqual(<<"done">>, go:call(P, test_utils, recurse, [P, 5]))
+        % Note: Atoms are returned as binaries when passed through Go→Erlang→Go callbacks
+        ?_assertEqual(<<"done">>, go:call(P, test_utils, recurse, [P, 50]))
     ).
 
 %%%

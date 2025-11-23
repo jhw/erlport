@@ -29,13 +29,27 @@ func length(v []interface{}) int {
 }
 
 // Recursion test - calls back to Erlang
-// Note: This is simplified for now, full implementation would need callback support
 func recurse(go_instance interface{}, n int) interface{} {
 	if n <= 0 {
-		return "done"
+		return erl.OtpErlangAtom("done")
 	}
-	// For now, just return done - full recursion would require calling back to Erlang
-	return "done"
+
+	if globalHandler == nil {
+		return erl.OtpErlangAtom("error")
+	}
+
+	// Call back to Erlang: go_tests:recurse(GoInstance, N-1)
+	result, err := globalHandler.Call("go_tests", "recurse", []interface{}{
+		go_instance,
+		n - 1,
+	})
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Recursion error: %v\n", err)
+		return erl.OtpErlangAtom("error")
+	}
+
+	return result
 }
 
 // SetupMessageHandler sets up a message handler that calls back to Erlang

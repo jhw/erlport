@@ -34,6 +34,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"sync"
 
 	"github.com/okeuday/erlang_go/src/erlang"
 )
@@ -42,13 +43,19 @@ type MessageHandler struct {
 	port           *erlproto.Port
 	handlers       map[string]interface{}
 	messageHandler func(interface{})
+	messageID      uint64
+	responses      map[uint64]chan interface{}
+	responseLock   sync.Mutex
+	messageIDLock  sync.Mutex
 }
 
 // NewMessageHandler creates a new message handler
 func NewMessageHandler(port *erlproto.Port) *MessageHandler {
 	return &MessageHandler{
-		port:     port,
-		handlers: make(map[string]interface{}),
+		port:      port,
+		handlers:  make(map[string]interface{}),
+		responses: make(map[uint64]chan interface{}),
+		messageID: 0,
 	}
 }
 
@@ -80,6 +87,68 @@ func (h *MessageHandler) Cast(pid interface{}, message interface{}) error {
 	return h.port.Write(castMessage)
 }
 
+// nextMessageID generates the next message ID in a thread-safe manner
+func (h *MessageHandler) nextMessageID() uint64 {
+	h.messageIDLock.Lock()
+	defer h.messageIDLock.Unlock()
+	h.messageID++
+	return h.messageID
+}
+
+// Call calls an Erlang function and waits for the response
+func (h *MessageHandler) Call(module, function string, args []interface{}) (interface{}, error) {
+	// Generate message ID
+	msgID := h.nextMessageID()
+
+	// Create response channel
+	respChan := make(chan interface{}, 1)
+	h.responseLock.Lock()
+	h.responses[msgID] = respChan
+	h.responseLock.Unlock()
+
+	// Clean up response channel when done
+	defer func() {
+		h.responseLock.Lock()
+		delete(h.responses, msgID)
+		h.responseLock.Unlock()
+		close(respChan)
+	}()
+
+	// Build call message: {'C', Id, Module, Function, Args, Context}
+	// Context 'N' means normal (asynchronous spawn on Erlang side)
+	callMessage := erlang.OtpErlangTuple([]interface{}{
+		erlang.OtpErlangAtom("C"),
+		msgID,
+		erlang.OtpErlangAtom(module),
+		erlang.OtpErlangAtom(function),
+		erlang.OtpErlangList{Value: args},
+		erlang.OtpErlangAtom("N"),
+	})
+
+	// Send the call
+	err := h.port.Write(callMessage)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send call: %v", err)
+	}
+
+	// Wait for response
+	response := <-respChan
+
+	// Normalize response (convert STRING_EXT and binaries properly)
+	response = normalizeErlangTerm(response)
+
+	// Check if it's an error response
+	if responseTuple, ok := response.(erlang.OtpErlangTuple); ok {
+		if len(responseTuple) >= 2 {
+			if atom, ok := responseTuple[0].(erlang.OtpErlangAtom); ok && string(atom) == "error" {
+				return nil, fmt.Errorf("erlang error: %v", responseTuple[1])
+			}
+		}
+	}
+
+	return response, nil
+}
+
 // Start begins the message processing loop
 func (h *MessageHandler) Start() {
 	h.start()
@@ -97,13 +166,29 @@ func (h *MessageHandler) start() {
 			continue
 		}
 
-		response := h.handleMessage(message)
-		if response != nil {
-			err = h.port.Write(response)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error writing response: %v\n", err)
+		// Check if this is a response message ('r' or 'e')
+		// These must be handled synchronously to unblock waiting Call()s
+		if tuple, ok := message.(erlang.OtpErlangTuple); ok && len(tuple) >= 2 {
+			if msgTypeAtom, ok := tuple[0].(erlang.OtpErlangAtom); ok {
+				msgType := string(msgTypeAtom)
+				if msgType == "r" || msgType == "e" {
+					// Handle response synchronously
+					h.handleMessage(message)
+					continue
+				}
 			}
 		}
+
+		// For call messages ('C'), handle in goroutine to avoid blocking message loop
+		go func(msg interface{}) {
+			response := h.handleMessage(msg)
+			if response != nil {
+				err := h.port.Write(response)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing response: %v\n", err)
+				}
+			}
+		}(message)
 	}
 }
 
@@ -148,12 +233,67 @@ func (h *MessageHandler) handleMessage(message interface{}) interface{} {
 			return nil
 		}
 		return h.handleCast(tuple[1:])
+	case "r": // Response (success)
+		// Format: {'r', Id, Result}
+		h.handleResponse(msgID, tuple[2])
+		return nil
+	case "e": // Response (error)
+		// Format: {'e', Id, Error}
+		h.handleResponse(msgID, erlang.OtpErlangTuple([]interface{}{
+			erlang.OtpErlangAtom("error"),
+			tuple[2],
+		}))
+		return nil
 	case "P": // Print
 		// Handle print messages
 		return nil
 	default:
 		return h.errorResponse(msgID, "unknown_message", fmt.Sprintf("Unknown message type: %s", msgType), nil)
 	}
+}
+
+// handleResponse routes a response to the appropriate waiting channel
+func (h *MessageHandler) handleResponse(msgID interface{}, result interface{}) {
+	// Convert msgID to uint64
+	var id uint64
+	switch v := msgID.(type) {
+	case uint64:
+		id = v
+	case uint:
+		id = uint64(v)
+	case uint8:
+		id = uint64(v)
+	case uint16:
+		id = uint64(v)
+	case uint32:
+		id = uint64(v)
+	case int:
+		id = uint64(v)
+	case int8:
+		id = uint64(v)
+	case int16:
+		id = uint64(v)
+	case int32:
+		id = uint64(v)
+	case int64:
+		id = uint64(v)
+	default:
+		fmt.Fprintf(os.Stderr, "Invalid message ID type: %T\n", msgID)
+		return
+	}
+
+	// Find the response channel
+	h.responseLock.Lock()
+	respChan, exists := h.responses[id]
+	h.responseLock.Unlock()
+
+	if !exists {
+		fmt.Fprintf(os.Stderr, "No response channel for message ID: %d\n", id)
+		return
+	}
+
+	// Send the response (blocking - channel is buffered)
+	respChan <- result
 }
 
 // normalizeErlangTerm converts STRING_EXT strings to OtpErlangLists recursively
