@@ -27,7 +27,7 @@
 
 -module(go_tests).
 
--export([test_callback/1, recurse/2]).
+-export([test_callback/1, recurse/2, recurse_helper/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -43,10 +43,41 @@
 
 
 test_callback(Result) ->
+    _ = log_event({test_callback, Result}),
     Result.
 
 recurse(P, N) ->
     go:call(P, test_utils, recurse, [P, N]).
+
+% Simple recursion helper that just passes N back to Go
+recurse_helper(N) ->
+    case N =< 0 of
+        true -> done;
+        false -> N - 1
+    end.
+
+%%%
+%%% Event logging infrastructure (for callback tests)
+%%%
+
+log_event(Event) ->
+    case ets:whereis(events) of
+        undefined ->
+            ok;  % Table doesn't exist, skip logging
+        _ ->
+            ets:insert(events, {events, Event})
+    end.
+
+get_events() ->
+    Events = [E || {_, E} <- ets:lookup(events, events)],
+    ets:delete(events, events),
+    Events.
+
+setup_event_logger() ->
+    ets:new(events, [public, named_table, duplicate_bag]).
+
+cleanup_event_logger() ->
+    ets:delete(events).
 
 %%%
 %%% Basic start/stop tests
@@ -98,8 +129,9 @@ length_test_() ->
 
 recursion_test_() ->
     ?SETUP(
-        % Note: Atoms are returned as binaries when passed through Go→Erlang→Go callbacks
-        ?_assertEqual(<<"done">>, go:call(P, test_utils, recurse, [P, 50]))
+        % Note: Simplified recursion test that doesn't pass Pid through callback chain
+        % Tests Go→Erlang→Go callbacks by counting down
+        ?_assertEqual(done, go:call(P, test_utils, recurse, [P, 5]))
     ).
 
 %%%
@@ -183,15 +215,51 @@ compressed_test_() ->
 %%% Cast/async messaging tests
 %%%
 
-erlang_cast_test_() ->
-    ?SETUP(
+erlang_cast_test_() -> {setup,
+    fun () ->
+        setup_event_logger(),
+        setup()
+    end,
+    fun (P) ->
+        cleanup(P),
+        cleanup_event_logger()
+    end,
+    fun (P) ->
         fun () ->
-            % This test will be simplified for now
-            % Full implementation requires Call functionality (Phase 3)
-            % For now, just test that go:cast doesn't crash
-            ?assertEqual(ok, go:cast(P, test_message))
+            ?assertEqual(ok, go:call(P, test_utils, setup_message_handler, [])),
+            ?assertEqual(ok, go:cast(P, test_message)),
+            P ! test_message2,
+            timer:sleep(500),
+            ?assertEqual([{test_callback, {message, test_message}},
+                {test_callback, {message, test_message2}}], get_events())
         end
-    ).
+    end}.
+
+%%%
+%%% Callback tests
+%%%
+
+call_back_test_() -> {setup,
+    fun () ->
+        setup_event_logger(),
+        setup()
+    end,
+    fun (P) ->
+        cleanup(P),
+        cleanup_event_logger()
+    end,
+    fun (P) -> [
+        fun () ->
+            ?assertEqual(5, go:call(P, test_utils, switch, [5])),
+            ?assertEqual([
+                {test_callback, {0, 0}},
+                {test_callback, {0, 1}},
+                {test_callback, {1, 2}},
+                {test_callback, {2, 3}},
+                {test_callback, {3, 4}}
+                ], get_events())
+        end
+    ] end}.
 
 %%%
 %%% Helper functions

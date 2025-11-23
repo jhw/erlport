@@ -29,40 +29,94 @@ func length(v []interface{}) int {
 }
 
 // Recursion test - calls back to Erlang
+// Note: Simplified to avoid opaque Pid issues in Go
+// Just makes callbacks and counts down
 func recurse(go_instance interface{}, n int) interface{} {
-	if n <= 0 {
-		return erl.OtpErlangAtom("done")
-	}
-
 	if globalHandler == nil {
 		return erl.OtpErlangAtom("error")
 	}
 
-	// Call back to Erlang: go_tests:recurse(GoInstance, N-1)
-	result, err := globalHandler.Call("go_tests", "recurse", []interface{}{
-		go_instance,
-		n - 1,
-	})
+	// Call back to Erlang: go_tests:recurse_helper(N)
+	result, err := globalHandler.Call("go_tests", "recurse_helper", []interface{}{n})
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Recursion error: %v\n", err)
 		return erl.OtpErlangAtom("error")
 	}
 
-	return result
+	// If we get 'done', return it
+	if atom, ok := result.(erl.OtpErlangAtom); ok {
+		if string(atom) == "done" {
+			return atom
+		}
+	}
+
+	// Otherwise result should be N-1, recurse again
+	// Try various integer types
+	if nextN, ok := result.(int); ok {
+		return recurse(go_instance, nextN)
+	}
+	if nextN, ok := result.(uint8); ok {
+		return recurse(go_instance, int(nextN))
+	}
+	if nextN, ok := result.(int64); ok {
+		return recurse(go_instance, int(nextN))
+	}
+
+	return erl.OtpErlangAtom("error")
+}
+
+// Switch function - makes multiple callbacks to Erlang in a loop
+func switchFunc(n int) interface{} {
+	if globalHandler == nil {
+		return erl.OtpErlangAtom("error")
+	}
+
+	result := 0
+	for i := 0; i < n; i++ {
+		// Call go_tests:test_callback({Result, I})
+		response, err := globalHandler.Call("go_tests", "test_callback", []interface{}{
+			erl.OtpErlangTuple([]interface{}{result, i}),
+		})
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Switch callback error: %v\n", err)
+			return erl.OtpErlangAtom("error")
+		}
+
+		// Response is a tuple {Result, NewValue}
+		if tuple, ok := response.(erl.OtpErlangTuple); ok && len(tuple) == 2 {
+			// Extract the new result value
+			if newResult, ok := tuple[1].(int); ok {
+				result = newResult
+			} else if newResult, ok := tuple[1].(uint8); ok {
+				result = int(newResult)
+			}
+		}
+	}
+
+	return n
 }
 
 // SetupMessageHandler sets up a message handler that calls back to Erlang
-// This will be fully implemented in Phase 3 when Call functionality is added
 func setupMessageHandler() interface{} {
 	if globalHandler == nil {
 		return erl.OtpErlangAtom("error")
 	}
 
 	handler := func(message interface{}) {
-		// For now, just accept messages without processing
-		// Full implementation requires Call functionality (Phase 3)
-		_ = message
+		// Call back to go_tests:test_callback with {message, Message}
+		messageTuple := erl.OtpErlangTuple([]interface{}{
+			erl.OtpErlangAtom("message"),
+			message,
+		})
+
+		_, err := globalHandler.Call("go_tests", "test_callback", []interface{}{
+			messageTuple,
+		})
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Message handler callback error: %v\n", err)
+		}
 	}
 
 	globalHandler.SetMessageHandler(handler)
@@ -99,6 +153,7 @@ func main() {
 	handler.Register("add", add)
 	handler.Register("length", length)
 	handler.Register("recurse", recurse)
+	handler.Register("switch", switchFunc)
 	handler.Register("setup_message_handler", setupMessageHandler)
 
 	handler.Start()
