@@ -11,3 +11,14 @@ _build/
 .rebar/
 ebin/
 *.iml
+
+# Crash dumps
+erl_crash.dump
+rebar3.crashdump
+
+# Go compiled binaries and cache
+.erlport_cache/
+test/go/test_utils
+
+# Temporary test scripts
+test_*.erl
