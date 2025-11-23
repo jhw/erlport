@@ -6,9 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	erl "github.com/okeuday/erlang_go/src/erlang"
 )
 
 // Test utility functions that mirror Python/Ruby test utilities
+
+// Global handler to enable Cast operations
+var globalHandler *erlang.MessageHandler
 
 // Basic functions
 func identity(v interface{}) interface{} {
@@ -31,6 +36,23 @@ func recurse(go_instance interface{}, n int) interface{} {
 	}
 	// For now, just return done - full recursion would require calling back to Erlang
 	return "done"
+}
+
+// SetupMessageHandler sets up a message handler that calls back to Erlang
+// This will be fully implemented in Phase 3 when Call functionality is added
+func setupMessageHandler() interface{} {
+	if globalHandler == nil {
+		return erl.OtpErlangAtom("error")
+	}
+
+	handler := func(message interface{}) {
+		// For now, just accept messages without processing
+		// Full implementation requires Call functionality (Phase 3)
+		_ = message
+	}
+
+	globalHandler.SetMessageHandler(handler)
+	return erl.OtpErlangAtom("ok")
 }
 
 func main() {
@@ -57,10 +79,13 @@ func main() {
 	}
 
 	handler := erlang.NewMessageHandler(port)
+	globalHandler = handler // Set global handler for cast operations
+
 	handler.Register("identity", identity)
 	handler.Register("add", add)
 	handler.Register("length", length)
 	handler.Register("recurse", recurse)
+	handler.Register("setup_message_handler", setupMessageHandler)
 
 	handler.Start()
 }

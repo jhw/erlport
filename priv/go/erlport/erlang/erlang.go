@@ -39,8 +39,9 @@ import (
 )
 
 type MessageHandler struct {
-	port     *erlproto.Port
-	handlers map[string]interface{}
+	port           *erlproto.Port
+	handlers       map[string]interface{}
+	messageHandler func(interface{})
 }
 
 // NewMessageHandler creates a new message handler
@@ -60,6 +61,23 @@ func (h *MessageHandler) Register(name string, fn interface{}) error {
 	}
 	h.handlers[name] = fn
 	return nil
+}
+
+// SetMessageHandler sets a handler for cast messages
+func (h *MessageHandler) SetMessageHandler(handler func(interface{})) {
+	h.messageHandler = handler
+}
+
+// Cast sends an asynchronous message to an Erlang process
+func (h *MessageHandler) Cast(pid interface{}, message interface{}) error {
+	// Message format: {'M', Pid, Message}
+	// Note: pid and message are already Erlang terms, don't convert
+	castMessage := erlang.OtpErlangTuple([]interface{}{
+		erlang.OtpErlangAtom("M"),
+		pid,
+		message,
+	})
+	return h.port.Write(castMessage)
 }
 
 // Start begins the message processing loop
@@ -125,7 +143,11 @@ func (h *MessageHandler) handleMessage(message interface{}) interface{} {
 		}
 		return h.handleCall(msgID, tuple[2:])
 	case "M": // Message (cast)
-		return h.handleCast(tuple[2:])
+		// Format: {'M', Payload} (no message ID for casts)
+		if len(tuple) < 2 {
+			return nil
+		}
+		return h.handleCast(tuple[1:])
 	case "P": // Print
 		// Handle print messages
 		return nil
@@ -218,8 +240,29 @@ func (h *MessageHandler) handleCall(msgID interface{}, args []interface{}) inter
 
 // handleCast processes an async message (cast)
 func (h *MessageHandler) handleCast(args []interface{}) interface{} {
-	// For now, casts are not implemented
-	// In a full implementation, you would handle async messages here
+	// Message format: {'M', Payload}
+	if len(args) < 1 {
+		return nil
+	}
+
+	payload := args[0]
+
+	// If a message handler is registered, call it
+	if h.messageHandler != nil {
+		// Normalize the payload to convert STRING_EXT
+		normalizedPayload := normalizeErlangTerm(payload)
+
+		// Call the handler in a goroutine to not block message processing
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "Panic in message handler: %v\n%s\n", r, debug.Stack())
+				}
+			}()
+			h.messageHandler(normalizedPayload)
+		}()
+	}
+
 	return nil
 }
 

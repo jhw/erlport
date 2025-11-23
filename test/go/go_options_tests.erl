@@ -28,6 +28,7 @@
 -module(go_options_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("kernel/include/file.hrl").
 -include("go.hrl").
 
 %%%
@@ -93,6 +94,88 @@ go_src_valid_test() ->
                     ?assert(filelib:is_regular(Go));
                 false ->
                     ok  % Skip if test file doesn't exist
+            end
+    end.
+
+go_src_caching_test() ->
+    case os:find_executable("go") of
+        false ->
+            ok;  % Skip test if Go not installed
+        _ ->
+            SrcPath = "test/go/test_utils.go",
+            case filelib:is_regular(SrcPath) of
+                true ->
+                    % First compilation
+                    {ok, Options1} = go_options:parse([{go_src, SrcPath}]),
+                    BinaryPath = Options1#go_options.go,
+                    ?assert(filelib:is_regular(BinaryPath)),
+
+                    % Get initial mtime
+                    {ok, FileInfo1} = file:read_file_info(BinaryPath),
+                    MTime1 = FileInfo1#file_info.mtime,
+
+                    % Wait a bit to ensure different mtime if recompiled
+                    timer:sleep(1100),
+
+                    % Second compilation - should use cache
+                    {ok, Options2} = go_options:parse([{go_src, SrcPath}]),
+                    BinaryPath2 = Options2#go_options.go,
+                    ?assertEqual(BinaryPath, BinaryPath2),
+
+                    % Check mtime hasn't changed (binary wasn't recompiled)
+                    {ok, FileInfo2} = file:read_file_info(BinaryPath2),
+                    MTime2 = FileInfo2#file_info.mtime,
+                    ?assertEqual(MTime1, MTime2);
+                false ->
+                    ok
+            end
+    end.
+
+go_src_recompile_on_change_test() ->
+    case os:find_executable("go") of
+        false ->
+            ok;  % Skip test if Go not installed
+        _ ->
+            SrcPath = "test/go/test_utils.go",
+            case filelib:is_regular(SrcPath) of
+                true ->
+                    % First compilation
+                    {ok, Options1} = go_options:parse([{go_src, SrcPath}]),
+                    BinaryPath = Options1#go_options.go,
+                    ?assert(filelib:is_regular(BinaryPath)),
+
+                    % Get initial mtime of both source and binary
+                    {ok, SrcInfo1} = file:read_file_info(SrcPath),
+                    SrcMTime1 = SrcInfo1#file_info.mtime,
+                    {ok, BinInfo1} = file:read_file_info(BinaryPath),
+                    BinMTime1 = BinInfo1#file_info.mtime,
+
+                    % Wait to ensure different timestamp
+                    timer:sleep(1100),
+
+                    % Touch source file to make it newer
+                    Now = erlang:localtime(),
+                    ok = file:write_file_info(SrcPath, #file_info{mtime = Now}),
+
+                    % Verify source is now newer
+                    {ok, SrcInfo2} = file:read_file_info(SrcPath),
+                    SrcMTime2 = SrcInfo2#file_info.mtime,
+                    ?assert(SrcMTime2 > SrcMTime1),
+
+                    % Second compilation - should recompile because source is newer
+                    {ok, Options2} = go_options:parse([{go_src, SrcPath}]),
+                    BinaryPath2 = Options2#go_options.go,
+                    ?assertEqual(BinaryPath, BinaryPath2),
+
+                    % Check binary mtime has changed (binary was recompiled)
+                    {ok, BinInfo2} = file:read_file_info(BinaryPath2),
+                    BinMTime2 = BinInfo2#file_info.mtime,
+                    ?assert(BinMTime2 > BinMTime1),
+
+                    % Restore original source mtime
+                    ok = file:write_file_info(SrcPath, SrcInfo1);
+                false ->
+                    ok
             end
     end.
 

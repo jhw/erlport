@@ -179,6 +179,20 @@ compressed_test_() ->
     ).
 
 %%%
+%%% Cast/async messaging tests
+%%%
+
+erlang_cast_test_() ->
+    ?SETUP(
+        fun () ->
+            % This test will be simplified for now
+            % Full implementation requires Call functionality (Phase 3)
+            % For now, just test that go:cast doesn't crash
+            ?assertEqual(ok, go:cast(P, test_message))
+        end
+    ).
+
+%%%
 %%% Helper functions
 %%%
 
