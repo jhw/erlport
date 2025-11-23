@@ -40,7 +40,7 @@ parse_test_() ->
             port_options=PortOptions,
             buffer_size=65536}} = ruby_options:parse([]),
         ?assertPattern(Ruby, "/ruby(\\.exe)?$"),
-        ?assertPattern(RubyLib, "/priv/ruby1\\.[89]"),
+        ?assertPattern(RubyLib, "/priv/ruby"),
         ?assertEqual([{"RUBYLIB", RubyLib}], Env),
         ?assertEqual([{env, Env}, {packet, 4}, binary, hide, exit_status],
             PortOptions)
@@ -140,54 +140,49 @@ ruby_option_test_() -> {setup,
         BadName = filename:join(TmpDir, "not_executable"),
         ok = file:write_file(BadName, <<>>, [raw]),
         UnknownName = filename:join(TmpDir, "unknown"),
-        GoodRuby = erlport_test_utils:create_mock_script(
-            "ruby 1.8.7", TmpDir, "ruby"),
         GoodRuby19 = erlport_test_utils:create_mock_script(
-            "ruby 1.9.3p0", TmpDir, "ruby1.9"),
+            "ruby 1.9.3p0", TmpDir, "ruby19"),
         GoodRuby2 = erlport_test_utils:create_mock_script(
-            "ruby 2.0.0", TmpDir, "ruby2.0"),
+            "ruby 2.0.0", TmpDir, "ruby20"),
+        GoodRuby3 = erlport_test_utils:create_mock_script(
+            "ruby 3.0.0", TmpDir, "ruby30"),
         UnsupportedRuby = erlport_test_utils:create_mock_script(
-            "ruby 1.7.0", TmpDir, "unsupported"),
+            "ruby 1.8.7", TmpDir, "unsupported"),
         InvalidRuby = erlport_test_utils:create_mock_script(
             "ruby INVALID", TmpDir, "invalid"),
-        {TmpDir, GoodRuby, GoodRuby19, GoodRuby2, BadName, UnknownName,
+        {TmpDir, GoodRuby19, GoodRuby2, GoodRuby3, BadName, UnknownName,
             UnsupportedRuby, InvalidRuby}
     end,
     fun (Info) ->
         ok = erlport_test_utils:remove_object(element(1, Info)) % TmpDir
     end,
-    fun ({_, GoodRuby, GoodRuby19, GoodRuby2, BadName, UnknownName,
+    fun ({_, GoodRuby19, GoodRuby2, GoodRuby3, BadName, UnknownName,
             UnsupportedRuby, InvalidRuby}) -> [
         fun () ->
             {ok, #ruby_options{ruby=Ruby}} = ruby_options:parse([]),
             ?assertPattern(Ruby, "/ruby(\\.exe)?$")
         end,
         fun () ->
-            Expected = erlport_test_utils:script(GoodRuby),
-            ?_assertMatch({ok, #ruby_options{ruby=Expected}},
-                ruby_options:parse([{ruby, GoodRuby}]))
-        end,
-        fun () ->
-            Expected = erlport_test_utils:script(GoodRuby),
-            {ok, #ruby_options{ruby=Expected, ruby_lib=RubyPath}}
-                = ruby_options:parse([{ruby, GoodRuby}]),
-            ?assertPattern(RubyPath, "/priv/ruby1\\.8")
-        end,
-        fun () ->
             Expected = erlport_test_utils:script(GoodRuby19),
             {ok, #ruby_options{ruby=Expected, ruby_lib=RubyPath}}
                 = ruby_options:parse([{ruby, GoodRuby19}]),
-            ?assertPattern(RubyPath, "/priv/ruby1\\.9")
+            ?assertPattern(RubyPath, "/priv/ruby")
         end,
         fun () ->
             Expected = erlport_test_utils:script(GoodRuby2),
             {ok, #ruby_options{ruby=Expected, ruby_lib=RubyPath}}
                 = ruby_options:parse([{ruby, GoodRuby2}]),
-            ?assertPattern(RubyPath, "/priv/ruby1\\.9")
+            ?assertPattern(RubyPath, "/priv/ruby")
         end,
         fun () ->
-            Expected = erlport_test_utils:script(GoodRuby) ++ " -S",
-            CommandWithOption = GoodRuby ++ " -S",
+            Expected = erlport_test_utils:script(GoodRuby3),
+            {ok, #ruby_options{ruby=Expected, ruby_lib=RubyPath}}
+                = ruby_options:parse([{ruby, GoodRuby3}]),
+            ?assertPattern(RubyPath, "/priv/ruby")
+        end,
+        fun () ->
+            Expected = erlport_test_utils:script(GoodRuby19) ++ " -S",
+            CommandWithOption = GoodRuby19 ++ " -S",
             ?assertMatch({ok, #ruby_options{ruby=Expected}},
                 ruby_options:parse([{ruby, CommandWithOption}]))
         end,
@@ -215,13 +210,13 @@ ruby_option_test_() -> {setup,
                 end, "ERLPORT_RUBY", "INVALID_ruby")
         end,
         fun () ->
-            Expected = erlport_test_utils:script(GoodRuby),
+            Expected = erlport_test_utils:script(GoodRuby19),
             erlport_test_utils:call_with_env(fun () ->
                 ?assertMatch({ok, #ruby_options{ruby=Expected}},
                     ruby_options:parse([]))
-                end, "ERLPORT_RUBY", GoodRuby)
+                end, "ERLPORT_RUBY", GoodRuby19)
         end,
-        ?_assertEqual({error, {unsupported_ruby_version, "ruby 1.7.0"}},
+        ?_assertEqual({error, {unsupported_ruby_version, "ruby 1.8.7"}},
             ruby_options:parse([{ruby, UnsupportedRuby}])),
         ?_assertEqual({error, {invalid_ruby,
                 erlport_test_utils:script(InvalidRuby)}},
@@ -267,21 +262,21 @@ ruby_lib_option_test_() -> {setup,
             {ok, #ruby_options{ruby_lib=RubyLib,
                 env=[{"RUBYLIB", RubyLib}]=Env,
                 port_options=[{env, Env} | _]}} = ruby_options:parse([]),
-            ?assertPattern(RubyLib, "/priv/ruby1\\.[89]")
+            ?assertPattern(RubyLib, "/priv/ruby")
         end,
         fun () ->
             {ok, #ruby_options{ruby_lib=RubyLib,
                 env=[{"RUBYLIB", RubyLib}]=Env,
                 port_options=[{env, Env} | _]}} = ruby_options:parse(
                     [{ruby_lib, [TestPath1]}]),
-            ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1])
+            ?assertPattern(RubyLib, ["/priv/ruby", TestPath1])
         end,
         fun () ->
             {ok, #ruby_options{ruby_lib=RubyLib,
                 env=[{"RUBYLIB", RubyLib}]=Env,
                 port_options=[{env, Env} | _]}} = ruby_options:parse(
                     [{ruby_lib, TestPath1}]),
-            ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1])
+            ?assertPattern(RubyLib, ["/priv/ruby", TestPath1])
         end,
         fun () ->
             {ok, #ruby_options{ruby_lib=RubyLib,
@@ -289,7 +284,7 @@ ruby_lib_option_test_() -> {setup,
                 port_options=[{env, Env} | _]}} = ruby_options:parse(
                     [{ruby_lib, erlport_test_utils:local_path(
                         [TestPath1, TestPath2])}]),
-            ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1,
+            ?assertPattern(RubyLib, ["/priv/ruby", TestPath1,
                 TestPath2])
         end,
         fun () ->
@@ -298,7 +293,7 @@ ruby_lib_option_test_() -> {setup,
                 port_options=[{env, Env} | _]}} = ruby_options:parse(
                     [{ruby_lib, [TestPath1]},
                     {env, [{"RUBYLIB", TestPath2}]}]),
-            ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1,
+            ?assertPattern(RubyLib, ["/priv/ruby", TestPath1,
                 TestPath2])
         end,
         fun () ->
@@ -307,7 +302,7 @@ ruby_lib_option_test_() -> {setup,
                 port_options=[{env, Env} | _]}} = ruby_options:parse(
                     [{env, [{"RUBYLIB", TestPath1},
                     {"RUBYLIB", TestPath2}]}]),
-            ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1,
+            ?assertPattern(RubyLib, ["/priv/ruby", TestPath1,
                 TestPath2])
         end,
         fun () ->
@@ -317,7 +312,7 @@ ruby_lib_option_test_() -> {setup,
                     [{ruby_lib, [TestPath1, TestPath2, ""]},
                     {env, [{"RUBYLIB", erlport_test_utils:local_path(
                         [TestPath2, TestPath1])}]}]),
-            ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1,
+            ?assertPattern(RubyLib, ["/priv/ruby", TestPath1,
                 TestPath2])
         end,
         fun () ->
@@ -325,7 +320,7 @@ ruby_lib_option_test_() -> {setup,
                 {ok, #ruby_options{ruby_lib=RubyLib,
                     env=[{"RUBYLIB", RubyLib}]=Env,
                     port_options=[{env, Env} | _]}} = ruby_options:parse([]),
-                ?assertPattern(RubyLib, "/priv/ruby1\\.[89]")
+                ?assertPattern(RubyLib, "/priv/ruby")
                 end, "RUBYLIB", "")
         end,
         fun () ->
@@ -333,7 +328,7 @@ ruby_lib_option_test_() -> {setup,
                 {ok, #ruby_options{ruby_lib=RubyLib,
                     env=[{"RUBYLIB", RubyLib}]=Env,
                     port_options=[{env, Env} | _]}} = ruby_options:parse([]),
-                ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1])
+                ?assertPattern(RubyLib, ["/priv/ruby", TestPath1])
                 end, "RUBYLIB", TestPath1)
         end,
         fun () ->
@@ -341,7 +336,7 @@ ruby_lib_option_test_() -> {setup,
                 {ok, #ruby_options{ruby_lib=RubyLib,
                     env=[{"RUBYLIB", RubyLib}]=Env,
                     port_options=[{env, Env} | _]}} = ruby_options:parse([]),
-                ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1,
+                ?assertPattern(RubyLib, ["/priv/ruby", TestPath1,
                     TestPath2])
                 end, "RUBYLIB", erlport_test_utils:local_path(
                     [TestPath1, TestPath2]))
@@ -352,7 +347,7 @@ ruby_lib_option_test_() -> {setup,
                     env=[{"RUBYLIB", RubyLib}]=Env,
                     port_options=[{env, Env} | _]}} = ruby_options:parse(
                         [{ruby_lib, TestPath1}]),
-                ?assertPattern(RubyLib, ["/priv/ruby1\\.[89]", TestPath1,
+                ?assertPattern(RubyLib, ["/priv/ruby", TestPath1,
                     TestPath2])
                 end, "RUBYLIB", TestPath2)
         end,

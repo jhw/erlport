@@ -40,7 +40,7 @@ parse_test_() ->
             port_options=PortOptions,
             buffer_size=65536}} = python_options:parse([]),
         ?assertPattern(Python, "/python(\\.exe)?$"),
-        ?assertPattern(PythonPath, "/priv/python[23]"),
+        ?assertPattern(PythonPath, "/priv/python"),
         ?assertEqual([{"PYTHONPATH", PythonPath}], Env),
         ?assertEqual([{env, Env}, {packet, 4}, binary, hide, exit_status],
             PortOptions)
@@ -140,41 +140,41 @@ python_option_test_() -> {setup,
         BadName = filename:join(TmpDir, "not_executable"),
         ok = file:write_file(BadName, <<>>, [raw]),
         UnknownName = filename:join(TmpDir, "unknown"),
-        GoodPython = erlport_test_utils:create_mock_script(
-            "Python 2.5.0", TmpDir, "python2"),
         GoodPython3 = erlport_test_utils:create_mock_script(
-            "Python 3.0.0p1", TmpDir, "python3"),
+            "Python 3.0.0", TmpDir, "python3"),
+        GoodPython310 = erlport_test_utils:create_mock_script(
+            "Python 3.10.12", TmpDir, "python310"),
         UnsupportedPython = erlport_test_utils:create_mock_script(
-            "Python 2.4.6", TmpDir, "unsupported"),
+            "Python 2.7.18", TmpDir, "unsupported"),
         InvalidPython = erlport_test_utils:create_mock_script(
             "Python INVALID", TmpDir, "invalid"),
-        {TmpDir, GoodPython, GoodPython3, BadName, UnknownName,
+        {TmpDir, GoodPython3, GoodPython310, BadName, UnknownName,
             UnsupportedPython, InvalidPython}
     end,
     fun (Info) ->
         ok = erlport_test_utils:remove_object(element(1, Info)) % TmpDir
     end,
-    fun ({_, GoodPython, GoodPython3, BadName, UnknownName, UnsupportedPython,
+    fun ({_, GoodPython3, GoodPython310, BadName, UnknownName, UnsupportedPython,
             InvalidPython}) -> [
         fun () ->
             {ok, #python_options{python=Python}} = python_options:parse([]),
             ?assertPattern(Python, "/python(\\.exe)?$")
         end,
         fun () ->
-            Expected = erlport_test_utils:script(GoodPython),
-            {ok, #python_options{python=Expected, python_path=PythonPath}}
-                = python_options:parse([{python, GoodPython}]),
-            ?assertPattern(PythonPath, "/priv/python2")
-        end,
-        fun () ->
             Expected = erlport_test_utils:script(GoodPython3),
             {ok, #python_options{python=Expected, python_path=PythonPath}}
                 = python_options:parse([{python, GoodPython3}]),
-            ?assertPattern(PythonPath, "/priv/python3")
+            ?assertPattern(PythonPath, "/priv/python")
         end,
         fun () ->
-            Expected = erlport_test_utils:script(GoodPython) ++ " -S",
-            CommandWithOption = GoodPython ++ " -S",
+            Expected = erlport_test_utils:script(GoodPython310),
+            {ok, #python_options{python=Expected, python_path=PythonPath}}
+                = python_options:parse([{python, GoodPython310}]),
+            ?assertPattern(PythonPath, "/priv/python")
+        end,
+        fun () ->
+            Expected = erlport_test_utils:script(GoodPython3) ++ " -S",
+            CommandWithOption = GoodPython3 ++ " -S",
             ?assertMatch({ok, #python_options{python=Expected}},
                 python_options:parse([{python, CommandWithOption}]))
         end,
@@ -202,13 +202,13 @@ python_option_test_() -> {setup,
                 end, "ERLPORT_PYTHON", "INVALID_python")
         end,
         fun () ->
-            Expected = erlport_test_utils:script(GoodPython),
+            Expected = erlport_test_utils:script(GoodPython3),
             erlport_test_utils:call_with_env(fun () ->
                 ?assertMatch({ok, #python_options{python=Expected}},
                     python_options:parse([]))
-                end, "ERLPORT_PYTHON", GoodPython)
+                end, "ERLPORT_PYTHON", GoodPython3)
         end,
-        ?_assertEqual({error, {unsupported_python_version, "Python 2.4.6"}},
+        ?_assertEqual({error, {unsupported_python_version, "Python 2.7.18"}},
             python_options:parse([{python, UnsupportedPython}])),
         ?_assertEqual({error, {invalid_python,
                 erlport_test_utils:script(InvalidPython)}},
@@ -254,21 +254,21 @@ python_path_option_test_() -> {setup,
             {ok, #python_options{python_path=PythonPath,
                 env=[{"PYTHONPATH", PythonPath}]=Env,
                 port_options=[{env, Env} | _]}} = python_options:parse([]),
-            ?assertPattern(PythonPath, "/priv/python[23]")
+            ?assertPattern(PythonPath, "/priv/python")
         end,
         fun () ->
             {ok, #python_options{python_path=PythonPath,
                 env=[{"PYTHONPATH", PythonPath}]=Env,
                 port_options=[{env, Env} | _]}} = python_options:parse(
                     [{python_path, [TestPath1]}]),
-            ?assertPattern(PythonPath, ["/priv/python[23]", TestPath1])
+            ?assertPattern(PythonPath, ["/priv/python", TestPath1])
         end,
         fun () ->
             {ok, #python_options{python_path=PythonPath,
                 env=[{"PYTHONPATH", PythonPath}]=Env,
                 port_options=[{env, Env} | _]}} = python_options:parse(
                     [{python_path, TestPath1}]),
-            ?assertPattern(PythonPath, ["/priv/python[23]", TestPath1])
+            ?assertPattern(PythonPath, ["/priv/python", TestPath1])
         end,
         fun () ->
             {ok, #python_options{python_path=PythonPath,
@@ -277,7 +277,7 @@ python_path_option_test_() -> {setup,
                     [{python_path, erlport_test_utils:local_path(
                         [TestPath1, TestPath2])}]),
             ?assertPattern(PythonPath,
-                ["/priv/python[23]", TestPath1, TestPath2])
+                ["/priv/python", TestPath1, TestPath2])
         end,
         fun () ->
             {ok, #python_options{python_path=PythonPath,
@@ -286,7 +286,7 @@ python_path_option_test_() -> {setup,
                     [{python_path, [TestPath1]},
                     {env, [{"PYTHONPATH", TestPath2}]}]),
             ?assertPattern(PythonPath,
-                ["/priv/python[23]", TestPath1, TestPath2])
+                ["/priv/python", TestPath1, TestPath2])
         end,
         fun () ->
             {ok, #python_options{python_path=PythonPath,
@@ -295,7 +295,7 @@ python_path_option_test_() -> {setup,
                     [{env, [{"PYTHONPATH", TestPath1},
                     {"PYTHONPATH", TestPath2}]}]),
             ?assertPattern(PythonPath,
-                ["/priv/python[23]", TestPath1, TestPath2])
+                ["/priv/python", TestPath1, TestPath2])
         end,
         fun () ->
             {ok, #python_options{python_path=PythonPath,
@@ -305,14 +305,14 @@ python_path_option_test_() -> {setup,
                     {env, [{"PYTHONPATH", erlport_test_utils:local_path(
                         [TestPath2, TestPath1])}]}]),
             ?assertPattern(PythonPath,
-                ["/priv/python[23]", TestPath1, TestPath2])
+                ["/priv/python", TestPath1, TestPath2])
         end,
         fun () ->
             erlport_test_utils:call_with_env(fun () ->
                 {ok, #python_options{python_path=PythonPath,
                     env=[{"PYTHONPATH", PythonPath}]=Env,
                     port_options=[{env, Env} | _]}} = python_options:parse([]),
-                ?assertPattern(PythonPath, "/priv/python[23]")
+                ?assertPattern(PythonPath, "/priv/python")
                 end, "PYTHONPATH", "")
         end,
         fun () ->
@@ -320,7 +320,7 @@ python_path_option_test_() -> {setup,
                 {ok, #python_options{python_path=PythonPath,
                     env=[{"PYTHONPATH", PythonPath}]=Env,
                     port_options=[{env, Env} | _]}} = python_options:parse([]),
-                ?assertPattern(PythonPath, ["/priv/python[23]", TestPath1])
+                ?assertPattern(PythonPath, ["/priv/python", TestPath1])
                 end, "PYTHONPATH", TestPath1)
         end,
         fun () ->
@@ -329,7 +329,7 @@ python_path_option_test_() -> {setup,
                     env=[{"PYTHONPATH", PythonPath}]=Env,
                     port_options=[{env, Env} | _]}} = python_options:parse([]),
                 ?assertPattern(PythonPath,
-                    ["/priv/python[23]", TestPath1, TestPath2])
+                    ["/priv/python", TestPath1, TestPath2])
                 end, "PYTHONPATH", erlport_test_utils:local_path(
                     [TestPath1, TestPath2]))
         end,
@@ -340,7 +340,7 @@ python_path_option_test_() -> {setup,
                     port_options=[{env, Env} | _]}} = python_options:parse(
                         [{python_path, TestPath1}]),
                 ?assertPattern(PythonPath,
-                    ["/priv/python[23]", TestPath1, TestPath2])
+                    ["/priv/python", TestPath1, TestPath2])
                 end, "PYTHONPATH", TestPath2)
         end,
         ?_assertEqual({error, {invalid_option, {python_path, invalid_path},
