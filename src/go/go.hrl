@@ -28,7 +28,7 @@
 -ifndef(GO_HRL).
 -define(GO_HRL, true).
 
--include("erlport.hrl").
+-include("../erlport.hrl").
 
 -define(DEFAULT_GO, "go").
 -define(GO_VAR_NAME, "ERLPORT_GO").

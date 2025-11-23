@@ -28,7 +28,7 @@
 -ifndef(RUBY_HRL).
 -define(RUBY_HRL, true).
 
--include("erlport.hrl").
+-include("../erlport.hrl").
 
 -define(DEFAULT_RUBY, "ruby").
 -define(RUBY_VAR_NAME, "ERLPORT_RUBY").

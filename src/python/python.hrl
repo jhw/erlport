@@ -28,7 +28,7 @@
 -ifndef(PYTHON_HRL).
 -define(PYTHON_HRL, true).
 
--include("erlport.hrl").
+-include("../erlport.hrl").
 
 -define(DEFAULT_PYTHON, "python").
 -define(PYTHON_VAR_NAME, "ERLPORT_PYTHON").
