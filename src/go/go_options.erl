@@ -36,12 +36,14 @@
 
 -author('Dmitry Vasiliev <dima@hlabs.org>').
 
+-include_lib("kernel/include/file.hrl").
+
 -export([
     parse/1
     ]).
 
 -type option() :: {go, Go :: string()}
-    | {go_src, SrcPath :: string()}
+    | {go_binary, BinaryPath :: string()}
     | {go_path, Path :: string() | [Path :: string()]}
     | erlport_options:option().
 -type options() :: [option()].
@@ -64,9 +66,9 @@ parse(Options) when is_list(Options) ->
 parse([{go, Go} | Tail], Options) ->
     % Will be checked later
     parse(Tail, Options#go_options{go=Go});
-parse([{go_src, GoSrc} | Tail], Options) ->
-    % Will be validated and compiled later
-    parse(Tail, Options#go_options{go_src=GoSrc});
+parse([{go_binary, GoBinary} | Tail], Options) ->
+    % Will be validated later - expects pre-compiled binary (Lambda-style)
+    parse(Tail, Options#go_options{go_binary=GoBinary});
 parse([{go_path, GoPath}=Value | Tail], Options) ->
     case erlport_options:filter_invalid_paths(GoPath) of
         {ok, Path} ->
@@ -83,36 +85,28 @@ parse([Option | Tail], Options) ->
             Error
     end;
 parse([], Options=#go_options{env=Env0, go_path=GoPath0,
-        go=Go, go_src=GoSrc, port_options=PortOptions, packet=Packet,
+        go_binary=GoBinary, port_options=PortOptions, packet=Packet,
         cd=Path, use_stdio=UseStdio}) ->
     PortOptions1 = erlport_options:update_port_options(
         PortOptions, Path, UseStdio),
-    case get_go(Go) of
-        {ok, GoCmd, _MajVersion} ->
-            case update_go_path(Env0, GoPath0) of
-                {ok, GoPath, Env} ->
-                    % Handle Go source compilation if specified
-                    case GoSrc of
-                        undefined ->
-                            % No source specified, use Go command directly (won't work)
+    case update_go_path(Env0, GoPath0) of
+        {ok, GoPath, Env} ->
+            % Lambda-style: expect pre-compiled binary
+            case GoBinary of
+                undefined ->
+                    {error, {missing_option, go_binary,
+                        "Go binary path required (like AWS Lambda)"}};
+                BinaryPath ->
+                    % Validate binary exists and is executable
+                    case validate_go_binary(BinaryPath) of
+                        ok ->
                             {ok, Options#go_options{env=Env,
-                                go_path=GoPath, go=GoCmd,
+                                go_path=GoPath, go=BinaryPath,
                                 port_options=[{env, Env}, {packet, Packet}
                                     | PortOptions1]}};
-                        SrcPath ->
-                            % Compile source and return binary path
-                            case compile_go_source(GoCmd, SrcPath, GoPath, Env) of
-                                {ok, BinaryPath} ->
-                                    {ok, Options#go_options{env=Env,
-                                        go_path=GoPath, go=BinaryPath,
-                                        port_options=[{env, Env}, {packet, Packet}
-                                            | PortOptions1]}};
-                                {error, _}=CompileError ->
-                                    CompileError
-                            end
-                    end;
-                {error, _}=Error ->
-                    Error
+                        {error, _}=ValidationError ->
+                            ValidationError
+                    end
             end;
         {error, _}=Error ->
             Error
@@ -144,46 +138,6 @@ update_go_path(Env0, GoPath0) ->
             {ok, GoPath, Env3}
     end.
 
-get_go(default) ->
-    case erlport_options:getenv(?GO_VAR_NAME) of
-        "" ->
-            try find_go(?DEFAULT_GO)
-            catch
-                throw:not_found ->
-                    {error, go_not_found}
-            end;
-        Go ->
-            try find_go(Go)
-            catch
-                throw:not_found ->
-                    {error, {invalid_env_var, {?GO_VAR_NAME, Go},
-                        not_found}}
-            end
-    end;
-get_go(Go=[_|_]) ->
-    try find_go(Go)
-    catch
-        throw:not_found ->
-            {error, {invalid_option, {go, Go}, not_found}}
-    end;
-get_go(Go) ->
-    {error, {invalid_option, {go, Go}}}.
-
-find_go(Go) ->
-    {GoCommand, Options} = lists:splitwith(fun (C) -> C =/= $ end, Go),
-    case os:find_executable(GoCommand) of
-        false ->
-            throw(not_found);
-        Filename ->
-            Fullname = erlport_options:absname(Filename),
-            case check_go_version(Fullname) of
-                {ok, {MajVersion, _, _}} ->
-                    {ok, Fullname ++ Options, MajVersion};
-                {error, _}=Error ->
-                    Error
-            end
-    end.
-
 extract_go_path([{"GOPATH", P} | Tail], Path, Env) ->
     extract_go_path(Tail, [P, erlport_options:pathsep() | Path], Env);
 extract_go_path([Item | Tail], Path, Env) ->
@@ -191,79 +145,24 @@ extract_go_path([Item | Tail], Path, Env) ->
 extract_go_path([], Path, Env) ->
     {lists:append(lists:reverse(Path)), lists:reverse(Env)}.
 
-check_go_version(Go) ->
-    Out = erlport_options:get_version(Go ++ " version"),
-    case re:run(Out, "go version go([0-9]+)\\.([0-9]+)\\.?([0-9]*)",
-            [{capture, all_but_first, list}]) of
-        {match, [Maj, Min]} ->
-            Version = {list_to_integer(Maj), list_to_integer(Min), 0},
-            if
-                Version >= {1, 11, 0} ->
-                    {ok, Version};
-                true ->
-                    {error, {unsupported_go_version, Out}}
-            end;
-        {match, [Maj, Min, Patch]} ->
-            Version = {list_to_integer(Maj), list_to_integer(Min),
-                       list_to_integer(Patch)},
-            if
-                Version >= {1, 11, 0} ->
-                    {ok, Version};
-                true ->
-                    {error, {unsupported_go_version, Out}}
-            end;
-        nomatch ->
-            {error, {invalid_go, Go}}
-    end.
-
-compile_go_source(GoCmd, SrcPath, _GoPath, _Env) ->
-    % Check if source file exists
-    case filelib:is_regular(SrcPath) of
+validate_go_binary(BinaryPath) ->
+    % Check if binary exists
+    case filelib:is_regular(BinaryPath) of
         false ->
-            {error, {go_src_not_found, SrcPath}};
+            {error, {go_binary_not_found, BinaryPath}};
         true ->
-            % Determine cache directory and binary path
-            CacheDir = filename:join([filename:dirname(SrcPath), ".erlport_cache"]),
-            SrcBase = filename:basename(SrcPath, ".go"),
-            BinaryPath = filename:join([CacheDir, SrcBase]),
-
-            % Check if compilation is needed
-            NeedsCompile = case filelib:is_regular(BinaryPath) of
-                false ->
-                    true;  % Binary doesn't exist
-                true ->
-                    % Check if source is newer than binary
-                    SrcTime = filelib:last_modified(SrcPath),
-                    BinTime = filelib:last_modified(BinaryPath),
-                    SrcTime > BinTime
-            end,
-
-            case NeedsCompile of
-                false ->
-                    {ok, BinaryPath};  % Use cached binary
-                true ->
-                    % Create cache directory if it doesn't exist
-                    ok = filelib:ensure_dir(BinaryPath),
-
-                    % Get absolute paths for source directory
-                    AbsSrcPath = filename:absname(SrcPath),
-                    SrcDir = filename:dirname(AbsSrcPath),
-
-                    % Build using cd to source directory and using relative paths
-                    % This ensures go.mod is found properly
-                    BuildCmd = lists:concat([
-                        "cd ", SrcDir, " && ",
-                        GoCmd, " build -o ", filename:absname(BinaryPath), " ",
-                        filename:basename(AbsSrcPath)
-                    ]),
-
-                    % Execute compilation
-                    Output = os:cmd(BuildCmd ++ " 2>&1"),
-                    case filelib:is_regular(BinaryPath) of
-                        true ->
-                            {ok, BinaryPath};  % Success - binary created
-                        false ->
-                            {error, {go_compile_failed, Output}}
-                    end
+            % Check if binary is executable (Unix-style check)
+            AbsPath = filename:absname(BinaryPath),
+            case file:read_file_info(AbsPath) of
+                {ok, FileInfo} ->
+                    % Check if owner execute bit is set
+                    case FileInfo#file_info.mode band 8#00100 of
+                        0 ->
+                            {error, {go_binary_not_executable, AbsPath}};
+                        _ ->
+                            ok
+                    end;
+                {error, Reason} ->
+                    {error, {go_binary_access_error, AbsPath, Reason}}
             end
     end.

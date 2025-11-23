@@ -35,7 +35,7 @@
 
 -record(go_options, {
     go = default :: string() | default,
-    go_src :: string() | undefined,
+    go_binary :: string() | undefined,
     cd :: Path :: string() | undefined,
     use_stdio = use_stdio :: use_stdio | nouse_stdio,
     compressed = 0 :: 0..9,

@@ -32,151 +32,56 @@
 -include("go.hrl").
 
 %%%
-%%% go option tests
+%%% go_binary is required (no default, Lambda-style)
 %%%
 
 go_default_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;  % Skip test if Go not installed
-        _ ->
-            {ok, #go_options{go=Go}} = go_options:parse([]),
-            % Just check that Go was found, don't check exact path
-            ?assert(is_list(Go)),
-            ?assert(length(Go) > 0)
-    end.
-
-go_from_env_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;  % Skip test if Go not installed
-        GoPath ->
-            os:putenv("ERLPORT_GO", GoPath),
-            try
-                {ok, #go_options{go=Go}} = go_options:parse([]),
-                ?assertEqual(GoPath, Go)
-            after
-                os:unsetenv("ERLPORT_GO")
-            end
-    end.
-
-go_not_found_test() ->
-    ?assertMatch({error, {invalid_option, {go, _}, not_found}},
-        go_options:parse([{go, "nonexistent_go_binary_12345"}])).
-
-go_invalid_test() ->
-    ?assertMatch({error, {invalid_option, {go, _}}},
-        go_options:parse([{go, invalid}])).
+    % With Lambda-style, go_binary is required - no default
+    ?assertMatch({error, {missing_option, go_binary, _}},
+        go_options:parse([])).
 
 %%%
-%%% go_src option tests
+%%% go_binary option tests (Lambda-style)
 %%%
 
-go_src_not_found_test() ->
-    ?assertMatch({error, {go_src_not_found, _}},
-        go_options:parse([{go_src, "nonexistent_file.go"}])).
+go_binary_missing_test() ->
+    % Without go_binary option, should error
+    ?assertMatch({error, {missing_option, go_binary, _}},
+        go_options:parse([])).
 
-go_src_valid_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;  % Skip test if Go not installed
-        _ ->
-            % Use our test utils as a valid Go source file
-            SrcPath = "test/go/test_utils.go",
-            case filelib:is_regular(SrcPath) of
-                true ->
-                    {ok, Options} = go_options:parse([{go_src, SrcPath}]),
-                    % Should have compiled binary path
-                    ?assert(is_record(Options, go_options)),
-                    Go = Options#go_options.go,
-                    ?assert(is_list(Go)),
-                    % Binary should exist in cache
-                    ?assert(filelib:is_regular(Go));
-                false ->
-                    ok  % Skip if test file doesn't exist
-            end
+go_binary_not_found_test() ->
+    ?assertMatch({error, {go_binary_not_found, _}},
+        go_options:parse([{go_binary, "nonexistent_binary_12345"}])).
+
+go_binary_valid_test() ->
+    % Create a temporary executable binary for testing
+    TempBinary = "test/go/.erlport_test_temp/test_binary",
+    ok = filelib:ensure_dir(TempBinary),
+    file:write_file(TempBinary, <<"#!/bin/sh\necho test\n">>),
+    os:cmd(lists:concat(["chmod +x ", TempBinary])),
+
+    try
+        {ok, Options} = go_options:parse([{go_binary, TempBinary}]),
+        ?assert(is_record(Options, go_options)),
+        Go = Options#go_options.go,
+        ?assert(is_list(Go)),
+        ?assert(filelib:is_regular(Go))
+    after
+        file:delete(TempBinary)
     end.
 
-go_src_caching_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;  % Skip test if Go not installed
-        _ ->
-            SrcPath = "test/go/test_utils.go",
-            case filelib:is_regular(SrcPath) of
-                true ->
-                    % First compilation
-                    {ok, Options1} = go_options:parse([{go_src, SrcPath}]),
-                    BinaryPath = Options1#go_options.go,
-                    ?assert(filelib:is_regular(BinaryPath)),
+go_binary_not_executable_test() ->
+    % Create a temporary non-executable file
+    TempFile = "test/go/.erlport_test_temp/not_executable",
+    ok = filelib:ensure_dir(TempFile),
+    file:write_file(TempFile, <<"test">>),
+    os:cmd(lists:concat(["chmod -x ", TempFile])),
 
-                    % Get initial mtime
-                    {ok, FileInfo1} = file:read_file_info(BinaryPath),
-                    MTime1 = FileInfo1#file_info.mtime,
-
-                    % Wait a bit to ensure different mtime if recompiled
-                    timer:sleep(1100),
-
-                    % Second compilation - should use cache
-                    {ok, Options2} = go_options:parse([{go_src, SrcPath}]),
-                    BinaryPath2 = Options2#go_options.go,
-                    ?assertEqual(BinaryPath, BinaryPath2),
-
-                    % Check mtime hasn't changed (binary wasn't recompiled)
-                    {ok, FileInfo2} = file:read_file_info(BinaryPath2),
-                    MTime2 = FileInfo2#file_info.mtime,
-                    ?assertEqual(MTime1, MTime2);
-                false ->
-                    ok
-            end
-    end.
-
-go_src_recompile_on_change_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;  % Skip test if Go not installed
-        _ ->
-            SrcPath = "test/go/test_utils.go",
-            case filelib:is_regular(SrcPath) of
-                true ->
-                    % First compilation
-                    {ok, Options1} = go_options:parse([{go_src, SrcPath}]),
-                    BinaryPath = Options1#go_options.go,
-                    ?assert(filelib:is_regular(BinaryPath)),
-
-                    % Get initial mtime of both source and binary
-                    {ok, SrcInfo1} = file:read_file_info(SrcPath),
-                    SrcMTime1 = SrcInfo1#file_info.mtime,
-                    {ok, BinInfo1} = file:read_file_info(BinaryPath),
-                    BinMTime1 = BinInfo1#file_info.mtime,
-
-                    % Wait to ensure different timestamp
-                    timer:sleep(1100),
-
-                    % Touch source file to make it newer
-                    Now = erlang:localtime(),
-                    ok = file:write_file_info(SrcPath, #file_info{mtime = Now}),
-
-                    % Verify source is now newer
-                    {ok, SrcInfo2} = file:read_file_info(SrcPath),
-                    SrcMTime2 = SrcInfo2#file_info.mtime,
-                    ?assert(SrcMTime2 > SrcMTime1),
-
-                    % Second compilation - should recompile because source is newer
-                    {ok, Options2} = go_options:parse([{go_src, SrcPath}]),
-                    BinaryPath2 = Options2#go_options.go,
-                    ?assertEqual(BinaryPath, BinaryPath2),
-
-                    % Check binary mtime has changed (binary was recompiled)
-                    {ok, BinInfo2} = file:read_file_info(BinaryPath2),
-                    BinMTime2 = BinInfo2#file_info.mtime,
-                    ?assert(BinMTime2 > BinMTime1),
-
-                    % Restore original source mtime
-                    ok = file:write_file_info(SrcPath, SrcInfo1);
-                false ->
-                    ok
-            end
+    try
+        ?assertMatch({error, {go_binary_not_executable, _}},
+            go_options:parse([{go_binary, TempFile}]))
+    after
+        file:delete(TempFile)
     end.
 
 %%%
@@ -184,25 +89,35 @@ go_src_recompile_on_change_test() ->
 %%%
 
 go_path_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;
-        _ ->
-            {ok, Options} = go_options:parse([{go_path, "/tmp/test_gopath"}]),
-            ?assert(is_list(Options#go_options.go_path)),
-            ?assert(string:str(Options#go_options.go_path, "/tmp/test_gopath") > 0)
+    % Create a temporary executable for the test
+    TempBinary = "test/go/.erlport_test_temp/test_binary_gopath",
+    ok = filelib:ensure_dir(TempBinary),
+    file:write_file(TempBinary, <<"#!/bin/sh\necho test\n">>),
+    os:cmd(lists:concat(["chmod +x ", TempBinary])),
+
+    try
+        {ok, Options} = go_options:parse([{go_binary, TempBinary}, {go_path, "/tmp/test_gopath"}]),
+        ?assert(is_list(Options#go_options.go_path)),
+        ?assert(string:str(Options#go_options.go_path, "/tmp/test_gopath") > 0)
+    after
+        file:delete(TempBinary)
     end.
 
 go_path_list_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;
-        _ ->
-            {ok, Options} = go_options:parse([{go_path, ["/tmp/path1", "/tmp/path2"]}]),
-            GoPath = Options#go_options.go_path,
-            ?assert(is_list(GoPath)),
-            ?assert(string:str(GoPath, "/tmp/path1") > 0),
-            ?assert(string:str(GoPath, "/tmp/path2") > 0)
+    % Create a temporary executable for the test
+    TempBinary = "test/go/.erlport_test_temp/test_binary_gopath_list",
+    ok = filelib:ensure_dir(TempBinary),
+    file:write_file(TempBinary, <<"#!/bin/sh\necho test\n">>),
+    os:cmd(lists:concat(["chmod +x ", TempBinary])),
+
+    try
+        {ok, Options} = go_options:parse([{go_binary, TempBinary}, {go_path, ["/tmp/path1", "/tmp/path2"]}]),
+        GoPath = Options#go_options.go_path,
+        ?assert(is_list(GoPath)),
+        ?assert(string:str(GoPath, "/tmp/path1") > 0),
+        ?assert(string:str(GoPath, "/tmp/path2") > 0)
+    after
+        file:delete(TempBinary)
     end.
 
 go_path_invalid_test() ->
@@ -214,30 +129,42 @@ go_path_invalid_test() ->
 %%%
 
 use_stdio_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;
-        _ ->
-            {ok, Options} = go_options:parse([use_stdio]),
-            ?assertEqual(use_stdio, Options#go_options.use_stdio)
+    TempBinary = "test/go/.erlport_test_temp/test_binary_stdio",
+    ok = filelib:ensure_dir(TempBinary),
+    file:write_file(TempBinary, <<"#!/bin/sh\necho test\n">>),
+    os:cmd(lists:concat(["chmod +x ", TempBinary])),
+
+    try
+        {ok, Options} = go_options:parse([{go_binary, TempBinary}, use_stdio]),
+        ?assertEqual(use_stdio, Options#go_options.use_stdio)
+    after
+        file:delete(TempBinary)
     end.
 
 nouse_stdio_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;
-        _ ->
-            {ok, Options} = go_options:parse([nouse_stdio]),
-            ?assertEqual(nouse_stdio, Options#go_options.use_stdio)
+    TempBinary = "test/go/.erlport_test_temp/test_binary_nouse_stdio",
+    ok = filelib:ensure_dir(TempBinary),
+    file:write_file(TempBinary, <<"#!/bin/sh\necho test\n">>),
+    os:cmd(lists:concat(["chmod +x ", TempBinary])),
+
+    try
+        {ok, Options} = go_options:parse([{go_binary, TempBinary}, nouse_stdio]),
+        ?assertEqual(nouse_stdio, Options#go_options.use_stdio)
+    after
+        file:delete(TempBinary)
     end.
 
 compressed_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;
-        _ ->
-            {ok, Options} = go_options:parse([{compressed, 6}]),
-            ?assertEqual(6, Options#go_options.compressed)
+    TempBinary = "test/go/.erlport_test_temp/test_binary_compressed",
+    ok = filelib:ensure_dir(TempBinary),
+    file:write_file(TempBinary, <<"#!/bin/sh\necho test\n">>),
+    os:cmd(lists:concat(["chmod +x ", TempBinary])),
+
+    try
+        {ok, Options} = go_options:parse([{go_binary, TempBinary}, {compressed, 6}]),
+        ?assertEqual(6, Options#go_options.compressed)
+    after
+        file:delete(TempBinary)
     end.
 
 compressed_invalid_test() ->
@@ -245,12 +172,16 @@ compressed_invalid_test() ->
         go_options:parse([{compressed, 10}])).
 
 packet_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;
-        _ ->
-            {ok, Options} = go_options:parse([{packet, 2}]),
-            ?assertEqual(2, Options#go_options.packet)
+    TempBinary = "test/go/.erlport_test_temp/test_binary_packet",
+    ok = filelib:ensure_dir(TempBinary),
+    file:write_file(TempBinary, <<"#!/bin/sh\necho test\n">>),
+    os:cmd(lists:concat(["chmod +x ", TempBinary])),
+
+    try
+        {ok, Options} = go_options:parse([{go_binary, TempBinary}, {packet, 2}]),
+        ?assertEqual(2, Options#go_options.packet)
+    after
+        file:delete(TempBinary)
     end.
 
 packet_invalid_test() ->
@@ -258,12 +189,16 @@ packet_invalid_test() ->
         go_options:parse([{packet, 3}])).
 
 buffer_size_test() ->
-    case os:find_executable("go") of
-        false ->
-            ok;
-        _ ->
-            {ok, Options} = go_options:parse([{buffer_size, 32768}]),
-            ?assertEqual(32768, Options#go_options.buffer_size)
+    TempBinary = "test/go/.erlport_test_temp/test_binary_bufsize",
+    ok = filelib:ensure_dir(TempBinary),
+    file:write_file(TempBinary, <<"#!/bin/sh\necho test\n">>),
+    os:cmd(lists:concat(["chmod +x ", TempBinary])),
+
+    try
+        {ok, Options} = go_options:parse([{go_binary, TempBinary}, {buffer_size, 32768}]),
+        ?assertEqual(32768, Options#go_options.buffer_size)
+    after
+        file:delete(TempBinary)
     end.
 
 buffer_size_invalid_test() ->

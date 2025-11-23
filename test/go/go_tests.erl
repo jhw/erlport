@@ -83,26 +83,29 @@ cleanup_event_logger() ->
 %%% Basic start/stop tests
 %%%
 
-start_stop_test_() -> [
-    fun () ->
-        {ok, G} = go:start([{go_src, "test/go/test_utils.go"}]),
-        ?assertEqual(ok, go:stop(G))
-    end,
-    fun () ->
-        {ok, G} = go:start_link([{go_src, "test/go/test_utils.go"}]),
-        ?assertEqual(ok, go:stop(G))
-    end,
-    fun () ->
-        ?assertMatch({ok, _}, go:start({local, go_test},
-            [{go_src, "test/go/test_utils.go"}])),
-        ?assertEqual(ok, go:stop(go_test))
-    end,
-    fun () ->
-        ?assertMatch({ok, _}, go:start_link({local, go_test},
-            [{go_src, "test/go/test_utils.go"}])),
-        ?assertEqual(ok, go:stop(go_test))
-    end
-    ].
+start_stop_test_() -> {setup,
+    fun compile_test_binary/0,
+    fun cleanup_test_binary/1,
+    fun (BinaryPath) -> [
+        fun () ->
+            {ok, G} = go:start([{go_binary, BinaryPath}]),
+            ?assertEqual(ok, go:stop(G))
+        end,
+        fun () ->
+            {ok, G} = go:start_link([{go_binary, BinaryPath}]),
+            ?assertEqual(ok, go:stop(G))
+        end,
+        fun () ->
+            ?assertMatch({ok, _}, go:start({local, go_test},
+                [{go_binary, BinaryPath}])),
+            ?assertEqual(ok, go:stop(go_test))
+        end,
+        fun () ->
+            ?assertMatch({ok, _}, go:start_link({local, go_test},
+                [{go_binary, BinaryPath}])),
+            ?assertEqual(ok, go:stop(go_test))
+        end
+    ] end}.
 
 %%%
 %%% Call tests
@@ -284,12 +287,49 @@ queue_test_() ->
 %%% Helper functions
 %%%
 
+compile_test_binary() ->
+    % Compile the Go binary as part of test setup (Lambda-style)
+    SrcDir = "test/go",
+    BinaryPath = filename:join([SrcDir, "test_utils"]),
+
+    % Build the Go binary
+    BuildCmd = lists:concat([
+        "cd ", SrcDir, " && ",
+        "go build -o test_utils test_utils.go"
+    ]),
+
+    Output = os:cmd(BuildCmd ++ " 2>&1"),
+    case filelib:is_regular(BinaryPath) of
+        true ->
+            % Make sure it's executable
+            os:cmd(lists:concat(["chmod +x ", BinaryPath])),
+            BinaryPath;
+        false ->
+            error({compile_failed, Output})
+    end.
+
+cleanup_test_binary(BinaryPath) ->
+    % Clean up the compiled binary
+    file:delete(BinaryPath).
+
 setup() ->
     setup([]).
 
 setup(Options) ->
-    {ok, P} = go:start_link([{go_src, "test/go/test_utils.go"} | Options]),
+    BinaryPath = get_or_compile_binary(),
+    {ok, P} = go:start_link([{go_binary, BinaryPath} | Options]),
     P.
+
+get_or_compile_binary() ->
+    % Get or compile binary for individual test setups
+    case erlang:get(test_binary_path) of
+        undefined ->
+            Path = compile_test_binary(),
+            erlang:put(test_binary_path, Path),
+            Path;
+        Path ->
+            Path
+    end.
 
 cleanup(P) ->
     go:stop(P).
