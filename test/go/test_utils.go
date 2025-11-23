@@ -24,8 +24,21 @@ func add(a, b int) int {
 	return a + b
 }
 
-func length(v []interface{}) int {
-	return len(v)
+func length(v interface{}) int {
+	switch val := v.(type) {
+	case []interface{}:
+		return len(val)
+	case erl.OtpErlangList:
+		return len(val.Value)
+	case erl.OtpErlangBinary:
+		return len(val.Value)
+	case string:
+		return len(val)
+	case []byte:
+		return len(val)
+	default:
+		return 0
+	}
 }
 
 // Recursion test - calls back to Erlang

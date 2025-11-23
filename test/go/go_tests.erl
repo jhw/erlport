@@ -262,6 +262,25 @@ call_back_test_() -> {setup,
     ] end}.
 
 %%%
+%%% Pipeline and queue tests
+%%%
+
+call_pipeline_test_() ->
+    ?SETUP(
+        {inparallel, [
+            ?_assertEqual(N + 1, go:call(P, test_utils, add, [N , 1]))
+            || N <- lists:seq(1, 50)]}
+    ).
+
+queue_test_() ->
+    ?SETUP(
+        {inparallel, [
+            ?_assertEqual(262144, go:call(P, test_utils, length,
+                [<<0:262144/unit:8>>]))
+            || _ <- lists:seq(1, 50)]}
+    ).
+
+%%%
 %%% Helper functions
 %%%
 
