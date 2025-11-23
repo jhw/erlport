@@ -61,7 +61,7 @@
 
 tmp_file(BaseName) when is_list(BaseName) ->
     % Only needed for Erlang R13
-    crypto:start(),
+    application:start(crypto),
     tmp_file(BaseName, 3).
 
 tmp_file(_BaseName, 0) ->
@@ -85,7 +85,7 @@ tmp_file(BaseName, N) ->
 
 tmp_dir(BaseName) when is_list(BaseName) ->
     % Only needed for Erlang R13
-    crypto:start(),
+    application:start(crypto),
     tmp_dir(BaseName, 3).
 
 tmp_dir(_BaseName, 0) ->

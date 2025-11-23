@@ -26,13 +26,13 @@
 %%% POSSIBILITY OF SUCH DAMAGE.
 
 %%%
-%%% @doc ErlPort utility functions
+%%% @doc ErlPort protocol functions
 %%% @author Dmitry Vasiliev <dima@hlabs.org>
 %%% @copyright 2009-2015 Dmitry Vasiliev <dima@hlabs.org>
 %%% @private
 %%%
 
--module(erlport_utils).
+-module(erlport_protocol).
 
 -author('Dmitry Vasiliev <dima@hlabs.org>').
 

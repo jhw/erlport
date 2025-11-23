@@ -155,7 +155,7 @@ handle_info({'EXIT', Pid, {Id, Result}}, State=#state{calls=Calls}) ->
     case orddict:find(Id, Calls) of
         {ok, {Pid, Timer}} ->
             Calls2 = orddict:erase(Id, Calls),
-            erlport_utils:stop_timer(Timer),
+            erlport_protocol:stop_timer(Timer),
             handle_call_result(Id, Result, State#state{calls=Calls2});
         error ->
             {noreply, State}
@@ -294,9 +294,9 @@ handle_port_data(Data, State) ->
 %% @doc Handle incoming reply message
 %%
 handle_message({'r', Id, Result}, State) ->
-    erlport_utils:handle_response({ok, Result}, Id, State);
+    erlport_protocol:handle_response({ok, Result}, Id, State);
 handle_message({'e', Id, Error}, State) ->
-    erlport_utils:handle_response({error, Error}, Id, State);
+    erlport_protocol:handle_response({error, Error}, Id, State);
 handle_message({'e', Error}, State) ->
     {stop, {message_handler_error, Error}, State};
 handle_message(Request, State) ->
@@ -320,9 +320,9 @@ handle_incoming_message(Request, State) ->
 %%
 handle_call_result(Id, Result, State=#state{port=Port,
         compressed=Compressed}) ->
-    Data = erlport_utils:encode_term(format_call_result(Id, Result),
+    Data = erlport_protocol:encode_term(format_call_result(Id, Result),
         Compressed),
-    case erlport_utils:send_data(Port, Data) of
+    case erlport_protocol:send_data(Port, Data) of
         ok ->
             {noreply, State};
         error ->
@@ -333,11 +333,11 @@ handle_call_result(Id, Result, State=#state{port=Port,
 %% @doc Format incoming call result
 %%
 format_call_result(Id, {ok, Response}) ->
-    {'r', Id, erlport_utils:prepare_term(Response)};
+    {'r', Id, erlport_protocol:prepare_term(Response)};
 format_call_result(Id, {error, Error}) ->
-    {'e', Id, erlport_utils:prepare_term(Error)};
+    {'e', Id, erlport_protocol:prepare_term(Error)};
 format_call_result(Id, Error) ->
-    {'e', Id, {erlang, undefined, erlport_utils:prepare_term(Error), []}}.
+    {'e', Id, {erlang, undefined, erlport_protocol:prepare_term(Error), []}}.
 
 %%
 %% @doc Send or queue outgoing call request
@@ -361,14 +361,14 @@ send_request2({call, Module, Function, Args, _Options}, From, Timeout,
         State=#state{compressed=Compressed})
         when is_atom(Module) andalso is_atom(Function) andalso is_list(Args) ->
     Id = next_message_id(State),
-    Data = erlport_utils:encode_term({'C', Id, Module, Function,
-        erlport_utils:prepare_list(Args)}, Compressed),
-    erlport_utils:send_request(From, Data, Id, State, Timeout);
+    Data = erlport_protocol:encode_term({'C', Id, Module, Function,
+        erlport_protocol:prepare_list(Args)}, Compressed),
+    erlport_protocol:send_request(From, Data, Id, State, Timeout);
 send_request2({message, Message}, From, Timeout, State=#state{
         compressed=Compressed}) ->
-    Data = erlport_utils:encode_term({'M',
-        erlport_utils:prepare_term(Message)}, Compressed),
-    erlport_utils:send_request(From, Data, undefined, State, Timeout).
+    Data = erlport_protocol:encode_term({'M',
+        erlport_protocol:prepare_term(Message)}, Compressed),
+    erlport_protocol:send_request(From, Data, undefined, State, Timeout).
 
 %%
 %% @doc Generate next message ID
@@ -420,7 +420,7 @@ incoming_call(Id, Module, Function, Args, _Context, State=#state{
             {stop, {duplicate_incoming_call, Id, Info}, State};
         error ->
             Pid = spawn_call(Id, Module, Function, Args),
-            Info = {Pid, erlport_utils:start_timer(Timeout,
+            Info = {Pid, erlport_protocol:start_timer(Timeout,
                 {erlport_timeout, {in, Id}})},
             Calls2 = orddict:store(Id, Info, Calls),
             {noreply, State#state{calls=Calls2}}
