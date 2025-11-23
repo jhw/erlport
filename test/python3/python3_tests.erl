@@ -171,6 +171,10 @@ async_call_error_test_() -> {setup,
                     {'EXIT', P, {async_call_error,
                             {python, 'builtins.ImportError',
                                 "No module named 'unknown'", [_|_]}}} ->
+                        ok;
+                    {'EXIT', P, {async_call_error,
+                            {python, 'builtins.ModuleNotFoundError',
+                                "No module named 'unknown'", [_|_]}}} ->
                         ok
                 after
                     3000 ->
@@ -219,6 +223,9 @@ error_test_() ->
                     {error, python};
                 error:{python, 'builtins.ImportError',
                         "No module named 'unknown'", [_|_]} ->
+                    {error, python};
+                error:{python, 'builtins.ModuleNotFoundError',
+                        "No module named 'unknown'", [_|_]} ->
                     {error, python}
             end),
         ?_assertError({python, 'erlport.erlang.CallError',
@@ -229,11 +236,19 @@ error_test_() ->
         fun () ->
             P2 = setup(),
             try
-                ?assertError({python, 'erlport.erlang.CallError',
-                        "(Atom(b'python'), Atom(b'builtins.ImportError'), "
-                        ++ _, [_|_]},
-                    python:call(P, 'erlport.erlang', call,
-                        [python, call, [P2, unknown, unknown, []]]))
+                % Python 3.6+ uses ModuleNotFoundError instead of ImportError
+                Result = try python:call(P, 'erlport.erlang', call,
+                            [python, call, [P2, unknown, unknown, []]]),
+                    error
+                catch
+                    error:{python, 'erlport.erlang.CallError',
+                            "(Atom(b'python'), Atom(b'builtins.ImportError'), " ++ _, [_|_]} ->
+                        ok;
+                    error:{python, 'erlport.erlang.CallError',
+                            "(Atom(b'python'), Atom(b'builtins.ModuleNotFoundError'), " ++ _, [_|_]} ->
+                        ok
+                end,
+                ?assertEqual(ok, Result)
             after
                 cleanup(P2)
             end
