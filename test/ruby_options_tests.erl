@@ -142,21 +142,21 @@ ruby_option_test_() -> {setup,
         UnknownName = filename:join(TmpDir, "unknown"),
         GoodRuby19 = erlport_test_utils:create_mock_script(
             "ruby 1.9.3p0", TmpDir, "ruby19"),
-        GoodRuby2 = erlport_test_utils:create_mock_script(
-            "ruby 2.0.0", TmpDir, "ruby20"),
+        GoodRuby26 = erlport_test_utils:create_mock_script(
+            "ruby 2.6.10", TmpDir, "ruby26"),
         GoodRuby3 = erlport_test_utils:create_mock_script(
-            "ruby 3.0.0", TmpDir, "ruby30"),
+            "ruby 3.2.0", TmpDir, "ruby32"),
         UnsupportedRuby = erlport_test_utils:create_mock_script(
             "ruby 1.8.7", TmpDir, "unsupported"),
         InvalidRuby = erlport_test_utils:create_mock_script(
             "ruby INVALID", TmpDir, "invalid"),
-        {TmpDir, GoodRuby19, GoodRuby2, GoodRuby3, BadName, UnknownName,
+        {TmpDir, GoodRuby19, GoodRuby26, GoodRuby3, BadName, UnknownName,
             UnsupportedRuby, InvalidRuby}
     end,
     fun (Info) ->
         ok = erlport_test_utils:remove_object(element(1, Info)) % TmpDir
     end,
-    fun ({_, GoodRuby19, GoodRuby2, GoodRuby3, BadName, UnknownName,
+    fun ({_, GoodRuby19, GoodRuby26, GoodRuby3, BadName, UnknownName,
             UnsupportedRuby, InvalidRuby}) -> [
         fun () ->
             {ok, #ruby_options{ruby=Ruby}} = ruby_options:parse([]),
@@ -169,9 +169,9 @@ ruby_option_test_() -> {setup,
             ?assertPattern(RubyPath, "/priv/ruby")
         end,
         fun () ->
-            Expected = erlport_test_utils:script(GoodRuby2),
+            Expected = erlport_test_utils:script(GoodRuby26),
             {ok, #ruby_options{ruby=Expected, ruby_lib=RubyPath}}
-                = ruby_options:parse([{ruby, GoodRuby2}]),
+                = ruby_options:parse([{ruby, GoodRuby26}]),
             ?assertPattern(RubyPath, "/priv/ruby")
         end,
         fun () ->
