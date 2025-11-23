@@ -25,7 +25,7 @@
 %%% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 %%% POSSIBILITY OF SUCH DAMAGE.
 
--module(python3_tests).
+-module(python_tests).
 
 -export([test_callback/1, recurse/2]).
 

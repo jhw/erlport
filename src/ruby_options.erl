@@ -109,12 +109,12 @@ set_by_name(Name, Value, Options) ->
             setelement(N, Options, Value)
     end.
 
-update_ruby_lib(Env0, RubyPath0, MajVersion) ->
+update_ruby_lib(Env0, RubyPath0, _MajVersion) ->
     case code:priv_dir(erlport) of
         {error, bad_name} ->
             {error, {not_found, "erlport/priv"}};
         PrivDir ->
-            RubyDir = lists:concat([ruby, MajVersion]),
+            RubyDir = "ruby",
             ErlPortPath = erlport_options:joinpath(PrivDir, RubyDir),
             {PathFromSetEnv, Env2} = extract_ruby_lib(Env0, "", []),
             PathFromEnv = erlport_options:getenv("RUBYLIB"),
@@ -180,9 +180,7 @@ check_ruby_version(Ruby) ->
         {match, StrVersion} ->
             Version = list_to_tuple([list_to_integer(N) || N <- StrVersion]),
             if
-                Version >= {1, 8, 6} andalso Version < {2, 0, 0} ->
-                    {ok, Version};
-                Version >= {2, 0, 0} ->
+                Version >= {1, 9, 0} ->
                     {ok, {1, 9, 0}};
                 true ->
                     {error, {unsupported_ruby_version, Out}}

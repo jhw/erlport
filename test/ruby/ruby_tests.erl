@@ -25,7 +25,7 @@
 %%% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 %%% POSSIBILITY OF SUCH DAMAGE.
 
--module(python2_tests).
+-module(ruby_tests).
 
 -export([test_callback/1, recurse/2]).
 
@@ -51,43 +51,43 @@ recurse(P, N) ->
 
 start_stop_test_() -> [
     fun () ->
-        {ok, P} = python:start(),
-        ?assertEqual(ok, python:stop(P))
+        {ok, P} = ruby:start(),
+        ?assertEqual(ok, ruby:stop(P))
     end,
     fun () ->
-        {ok, P} = python:start_link(),
-        ?assertEqual(ok, python:stop(P))
+        {ok, P} = ruby:start_link(),
+        ?assertEqual(ok, ruby:stop(P))
     end,
     fun () ->
-        ?assertMatch({ok, _}, python:start({local, python_test})),
-        ?assertEqual(ok, python:stop(python_test))
+        ?assertMatch({ok, _}, ruby:start({local, ruby_test})),
+        ?assertEqual(ok, ruby:stop(ruby_test))
     end,
     fun () ->
-        ?assertMatch({ok, _}, python:start_link({local, python_test})),
-        ?assertEqual(ok, python:stop(python_test))
+        ?assertMatch({ok, _}, ruby:start_link({local, ruby_test})),
+        ?assertEqual(ok, ruby:stop(ruby_test))
     end,
     fun () ->
-        ?assertMatch({ok, _}, python:start({local, python_test}, [])),
-        ?assertEqual(ok, python:stop(python_test))
+        ?assertMatch({ok, _}, ruby:start({local, ruby_test}, [])),
+        ?assertEqual(ok, ruby:stop(ruby_test))
     end,
     fun () ->
-        ?assertMatch({ok, _}, python:start_link({local, python_test}, [])),
-        ?assertEqual(ok, python:stop(python_test))
+        ?assertMatch({ok, _}, ruby:start_link({local, ruby_test}, [])),
+        ?assertEqual(ok, ruby:stop(ruby_test))
     end
     ].
 
 call_test_() ->
     ?SETUP(
-        ?_assertEqual(4, python:call(P, operator, add, [2, 2]))
+        ?_assertEqual(4, ruby:call(P, test_utils, add, [2, 2]))
     ).
 
-python_cast_test_() ->
+ruby_cast_test_() ->
     ?SETUP(
         fun () ->
             Pid = self(),
             Message = test_message,
-            ?assertEqual(undefined, python:call(P, 'erlport.erlang', cast,
-                [Pid, Message])),
+            ?assertEqual(undefined, ruby:call(P, 'erlport/erlang',
+                'ErlPort::Erlang::cast', [Pid, Message])),
             ?assertEqual(ok, receive
                     Message ->
                         ok
@@ -109,9 +109,9 @@ erlang_cast_test_() -> {setup,
     end,
     fun (P) ->
         fun () ->
-            ?assertEqual(ok, python:call(P, test_utils, setup_message_handler,
+            ?assertEqual(ok, ruby:call(P, test_utils, setup_message_handler,
                 [])),
-            ?assertEqual(ok, python:cast(P, test_message)),
+            ?assertEqual(ok, ruby:cast(P, test_message)),
             P ! test_message2,
             timer:sleep(500),
             ?assertEqual([{test_callback, {message, test_message}},
@@ -131,14 +131,19 @@ message_handler_error_test_() -> {setup,
         process_flag(trap_exit, true),
         try
             link(P),
-            ?assertEqual(ok, python:call(P, test_utils,
+            ?assertEqual(ok, ruby:call(P, test_utils,
                 setup_faulty_message_handler, [])),
             P ! test_message,
             ?assertEqual(ok,
                 receive
                     {'EXIT', P, {message_handler_error,
-                            {python, 'exceptions.ValueError',
-                                "test_message", [_|_]}}} ->
+                            {ruby, 'ValueError', <<"test_message">>,
+                                [_|_]}}} ->
+                        ok;
+                    % Ruby 1.9.[12]
+                    {'EXIT', P, {message_handler_error,
+                            {ruby, 'ValueError', test_message,
+                                [_|_]}}} ->
                         ok
                 after
                     3000 ->
@@ -161,12 +166,19 @@ async_call_error_test_() -> {setup,
         process_flag(trap_exit, true),
         try
             link(P),
-            python:call(P, unknown, unknown, [], [async]),
+            ruby:call(P, unknown, unknown, [], [async]),
             ?assertEqual(ok,
                 receive
                     {'EXIT', P, {async_call_error,
-                            {python, 'exceptions.ImportError',
-                                "No module named unknown", [_|_]}}} ->
+                            {ruby, 'LoadError',
+                                <<"cannot load such file -- unknown">>,
+                                [_|_]}}} ->
+                        ok;
+                    % Ruby 1.9.[12]
+                    {'EXIT', P, {async_call_error,
+                            {ruby, 'LoadError',
+                                <<"no such file to load -- unknown">>,
+                                [_|_]}}} ->
                         ok
                 after
                     3000 ->
@@ -179,26 +191,30 @@ async_call_error_test_() -> {setup,
 
 recursion_test_() ->
     ?SETUP(
-        ?_assertEqual(done, python:call(P, test_utils, recurse, [P, 50]))
+        ?_assertEqual(done, ruby:call(P, test_utils, recurse, [P, 50]))
     ).
 
 objects_hierarchy_test_() ->
     ?SETUP(
-        ?_assertEqual(ok, python:call(P, test_utils,
-            'TestClass.TestSubClass.test_method', []))
+        ?_assertEqual(ok, ruby:call(P, test_utils,
+            'TestModule::TestClass::test_method', []))
     ).
 
 erlang_util_functions_test_() ->
     ?SETUP([
         fun () ->
-            ?assertEqual(P, python:call(P, 'erlport.erlang', self, [])),
+            ?assertEqual(P, ruby:call(P, 'erlport/erlang',
+                'ErlPort::Erlang::self', [])),
             % Check cached value
-            ?assertEqual(P, python:call(P, 'erlport.erlang', self, []))
+            ?assertEqual(P, ruby:call(P, 'erlport/erlang',
+                'ErlPort::Erlang::self', []))
         end,
         fun () ->
-            Ref = python:call(P, 'erlport.erlang', make_ref, []),
+            Ref = ruby:call(P, 'erlport/erlang',
+                'ErlPort::Erlang::make_ref', []),
             ?assert(is_reference(Ref)),
-            Ref2 = python:call(P, 'erlport.erlang', make_ref, []),
+            Ref2 = ruby:call(P, 'erlport/erlang',
+                'ErlPort::Erlang::make_ref', []),
             ?assert(is_reference(Ref2)),
             ?assertNot(Ref =:= Ref2)
         end
@@ -206,24 +222,43 @@ erlang_util_functions_test_() ->
 
 error_test_() ->
     ?SETUP([
-        ?_assertError({python, 'exceptions.ImportError',
-                "No module named unknown", [_|_]},
-            python:call(P, unknown, unknown, [])),
-        ?_assertError({python, 'erlport.erlang.CallError',
-                "(Atom('erlang'), Atom('error'), Atom('undef'), "
-                "List([(Atom('unknown'), Atom('unknown'), List([])" ++ _,
-                [_|_]},
-            python:call(P, 'erlport.erlang', call, [unknown, unknown, []])),
+        ?_assertEqual({error, ruby},
+            try ruby:call(P, unknown, unknown, [])
+            catch
+                error:{ruby, 'LoadError',
+                        <<"cannot load such file -- unknown">>, [_|_]} ->
+                    {error, ruby};
+                % Ruby 1.9.[12]
+                error:{ruby, 'LoadError',
+                        <<"no such file to load -- unknown">>, [_|_]} ->
+                    {error, ruby}
+            end),
+        ?_assertError({ruby, 'ErlPort::Erlang::CallError',
+                <<"Tuple([:erlang, :error, :undef, "
+                    "[Tuple([:unknown, :unknown, []", _/binary>>, [_|_]},
+            ruby:call(P, 'erlport/erlang', 'ErlPort::Erlang::call',
+                [unknown, unknown, []])),
         fun () ->
-            P2 = setup(),
+            R2 = setup(),
             try
-                ?assertError({python, 'erlport.erlang.CallError',
-                        "(Atom('python'), Atom('exceptions.ImportError'), "
-                        ++ _, [_|_]},
-                    python:call(P, 'erlport.erlang', call,
-                        [python, call, [P2, unknown, unknown, []]]))
+                ?assertEqual({error, ruby},
+                    try ruby:call(P, 'erlport/erlang', 'ErlPort::Erlang::call',
+                            [ruby, call, [R2, unknown, unknown, []]])
+                    catch
+                        error:{ruby, 'ErlPort::Erlang::CallError',
+                                <<"Tuple([:ruby, :LoadError, "
+                                "\"cannot load such file -- unknown\", ",
+                                _/binary>>, [_|_]} ->
+                            {error, ruby};
+                        % Ruby 1.9.[12]
+                        error:{ruby, 'ErlPort::Erlang::CallError',
+                                <<"Tuple([:ruby, :LoadError, "
+                                "\"no such file to load -- unknown\", ",
+                                _/binary>>, [_|_]} ->
+                            {error, ruby}
+                    end)
             after
-                cleanup(P2)
+                cleanup(R2)
             end
         end
     ]).
@@ -231,17 +266,17 @@ error_test_() ->
 stdin_stdout_test_() ->
     ?SETUP([
         ?_test(erlport_test_utils:assert_output(<<"HELLO!\n">>,
-            fun () -> undefined = python:call(P, test_utils, print_string,
+            fun () -> undefined = ruby:call(P, test_utils, 'print_string',
                 ["HELLO!"]) end, P)),
         ?_test(erlport_test_utils:assert_output(
             <<16#d0, 16#9f, 16#d1, 16#80, 16#d0, 16#b8, 16#d0, 16#b2,
                 16#d0, 16#b5, 16#d1, 16#82, "!\n">>,
-            fun () -> undefined = python:call(P, test_utils, print_string,
+            fun () -> undefined = ruby:call(P, test_utils, 'print_string',
                 [[16#41f, 16#440, 16#438, 16#432, 16#435, 16#442, $!]])
                 end, P)),
-        ?_assertError({python, 'exceptions.ValueError',
-            "I/O operation on closed file", [_|_]},
-            python:call(P, '__builtin__', raw_input, []))
+        ?_assertError({ruby, 'IOError',
+            <<"STDIN is closed for ErlPort connected process">>, [_|_]},
+            ruby:call(P, '', 'ARGF::read', []))
     ]).
 
 nouse_stdio_test_() ->
@@ -251,26 +286,26 @@ nouse_stdio_test_() ->
         _ ->
             ?SETUP(
                 setup_factory([nouse_stdio]),
-                ?_assertEqual(4, python:call(P, operator, add, [2, 2]))
+                ?_assertEqual(4, ruby:call(P, test_utils, add, [2, 2]))
             )
     end.
 
 packet4_test_() ->
     ?SETUP(
         setup_factory([{packet, 4}]),
-        ?_assertEqual(4, python:call(P, operator, add, [2, 2]))
+        ?_assertEqual(4, ruby:call(P, test_utils, add, [2, 2]))
     ).
 
 packet2_test_() ->
     ?SETUP(
         setup_factory([{packet, 2}]),
-        ?_assertEqual(4, python:call(P, operator, add, [2, 2]))
+        ?_assertEqual(4, ruby:call(P, test_utils, add, [2, 2]))
     ).
 
 packet1_test_() ->
     ?SETUP(
         setup_factory([{packet, 1}]),
-        ?_assertEqual(4, python:call(P, operator, add, [2, 2]))
+        ?_assertEqual(4, ruby:call(P, test_utils, add, [2, 2]))
     ).
 
 compressed_test_() ->
@@ -280,21 +315,21 @@ compressed_test_() ->
             S1 = list_to_binary(lists:duplicate(200, $0)),
             S2 = list_to_binary(lists:duplicate(200, $1)),
             ?assertEqual(<<S1/binary, S2/binary>>,
-                python:call(P, operator, add, [S1, S2]))
+                ruby:call(P, test_utils, 'add', [S1, S2]))
         end
     ).
 
 call_pipeline_test_() ->
     ?SETUP(
         {inparallel, [
-            ?_assertEqual(N + 1, python:call(P, operator, add, [N , 1]))
+            ?_assertEqual(N + 1, ruby:call(P, test_utils, 'add', [N , 1]))
             || N <- lists:seq(1, 50)]}
     ).
 
 queue_test_() ->
     ?SETUP(
         {inparallel, [
-            ?_assertEqual(262144, python:call(P, test_utils, length,
+            ?_assertEqual(262144, ruby:call(P, test_utils, 'len',
                 [<<0:262144/unit:8>>]))
             || _ <- lists:seq(1, 50)]}
     ).
@@ -309,10 +344,10 @@ call_back_test_() -> {setup,
         cleanup_event_logger()
     end,
     fun (P) -> [
-        ?_assertEqual(3, python:call(P, 'erlport.erlang', call,
+        ?_assertEqual(3, ruby:call(P, 'erlport/erlang', 'ErlPort::Erlang::call',
             [erlang, length, [[1, 2, 3]]])),
         fun () ->
-            ?assertEqual(ok, python:call(P, test_utils, switch, [5], [async])),
+            ?assertEqual(ok, ruby:call(P, test_utils, switch, [5], [async])),
             timer:sleep(500),
             ?assertEqual([
                 {test_callback, {0, 0}},
@@ -323,7 +358,7 @@ call_back_test_() -> {setup,
                 ], get_events())
         end,
         fun () ->
-            ?assertEqual(5, python:call(P, test_utils, switch, [5])),
+            ?assertEqual(5, ruby:call(P, test_utils, switch, [5])),
             ?assertEqual([
                 {test_callback, {0, 0}},
                 {test_callback, {0, 1}},
@@ -336,16 +371,22 @@ call_back_test_() -> {setup,
 
 datatype_test_() ->
     ?SETUP(
-        [?_assertEqual(V, python:call(P, test_utils, identity, [V]))
+        [?_assertEqual(V, ruby:call(P, test_utils, identity, [V]))
             || V <- datatype_test_data:get_test_data()]
+    ).
+
+unicode_symbols_test_() ->
+    ?SETUP(
+        ?_assertEqual(list_to_atom([16#d0, 16#90, 16#d0, 16#91]), ruby:call(P,
+            test_utils, string_to_sym, [[16#410, 16#411]]))
     ).
 
 custom_datatype_test_() ->
     ?SETUP(
         fun () ->
-            ?assertEqual(ok, python:call(P, test_utils, setup_date_types, [])),
-            ?assertEqual({date, {2013, 2, 1}}, python:call(P, operator, add,
-                [{date, {2013, 1, 31}}, {days, 1}]))
+            ?assertEqual(ok, ruby:call(P, test_utils, setup_date_types, [])),
+            ?assertEqual({date, {2013, 2, 1}}, ruby:call(P, test_utils, add,
+                [{date, {2013, 1, 31}}, 60 * 60 * 24]))
         end
     ).
 
@@ -358,12 +399,12 @@ setup() ->
 
 setup_factory(Options) ->
     fun () ->
-        {ok, P} = python:start_link([{python_path, "test/python2"} | Options]),
+        {ok, P} = ruby:start_link([{ruby_lib, "test/ruby1.9"} | Options]),
         P
     end.
 
 cleanup(P) ->
-    ok = python:stop(P).
+    ok = ruby:stop(P).
 
 log_event(Event) ->
     true = ets:insert(events, {events, Event}).

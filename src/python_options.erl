@@ -110,12 +110,12 @@ set_by_name(Name, Value, Options) ->
             setelement(N, Options, Value)
     end.
 
-update_python_path(Env0, PythonPath0, MajVersion) ->
+update_python_path(Env0, PythonPath0, _MajVersion) ->
     case code:priv_dir(erlport) of
         {error, bad_name} ->
             {error, {not_found, "erlport/priv"}};
         PrivDir ->
-            PythonDir = lists:concat([python, MajVersion]),
+            PythonDir = "python",
             ErlPortPath = erlport_options:joinpath(PrivDir, PythonDir),
             {PathFromSetEnv, Env2} = extract_python_path(Env0, "", []),
             PathFromEnv = erlport_options:getenv("PYTHONPATH"),
@@ -180,7 +180,7 @@ check_python_version(Python) ->
         {match, StrVersion} ->
             Version = list_to_tuple([list_to_integer(N) || N <- StrVersion]),
             if
-                Version >= {2, 5, 0} ->
+                Version >= {3, 0, 0} ->
                     {ok, Version};
                 true ->
                     {error, {unsupported_python_version, Out}}
